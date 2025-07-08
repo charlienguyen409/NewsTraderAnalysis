@@ -1,0 +1,20 @@
+# Start Prompt for Claude Code
+
+Build a full-stack market analysis application with a React frontend and Python backend that analyzes financial news to generate trading recommendations.
+
+**Frontend (React + TypeScript + Tailwind):**
+- Dashboard with "Analyze Market" button to trigger analysis on-demand
+- Position recommendations display with confidence scores and reasoning
+- Article browser to view/search all scraped content
+- Activity log showing real-time agent actions and analysis steps
+- Settings panel to configure number of positions, analysis parameters, and a dropdown to specify which LLM models to use. The minimum is to offer all the latest OpenAI GPT and Claude Models
+
+**Backend (FastAPI + PostgreSQL):**
+- RESTful API with WebSocket support for real-time updates
+- Comeup with amazing prompts for LLM to use
+- Scrape financial news from FinViz and BizToc with proper rate limiting and use OPENAI/Claude to analyze which headlines to cherrypick and scrape
+- Use OpenAI/Claude for sentiment analysis and catalyst detection (no keyword matching) 
+- Store all data in PostgreSQL with proper indexing
+- Generate BUY/SHORT recommendations with detailed reasoning
+
+The system should be production-ready with Docker support, comprehensive error handling, and a clean, modern UI that makes it easy to understand the agent's analysis process and trading recommendations.

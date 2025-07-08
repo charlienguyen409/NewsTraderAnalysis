@@ -1,6 +1,6 @@
 """API endpoints for LLM model information"""
 
-from typing import List
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -10,6 +10,7 @@ from ...config.models import (
     get_model_config,
     LLMModelConfig
 )
+from ...services.llm_service import LLMService
 
 router = APIRouter()
 
@@ -23,6 +24,26 @@ class ModelInfoResponse(BaseModel):
     input_pricing: float
     output_pricing: float
     description: str
+
+
+class CacheStatsResponse(BaseModel):
+    """Response model for cache statistics"""
+    cache_enabled: bool
+    total_keys: Optional[int] = None
+    headline_cache_count: Optional[int] = None
+    sentiment_cache_count: Optional[int] = None
+    position_cache_count: Optional[int] = None
+    memory_used: Optional[str] = None
+    hits: Optional[int] = None
+    misses: Optional[int] = None
+    hit_rate: Optional[float] = None
+    error: Optional[str] = None
+
+
+class CacheClearResponse(BaseModel):
+    """Response model for cache clearing"""
+    deleted: int
+    error: Optional[str] = None
 
 
 @router.get("/models", response_model=List[ModelInfoResponse])
@@ -80,3 +101,33 @@ async def get_model_info(model_id: str):
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/cache/stats", response_model=CacheStatsResponse)
+async def get_cache_stats():
+    """Get LLM cache statistics"""
+    llm_service = LLMService()
+    stats = llm_service.get_cache_stats()
+    return CacheStatsResponse(**stats)
+
+
+@router.delete("/cache", response_model=CacheClearResponse)
+async def clear_all_cache():
+    """Clear all LLM cache"""
+    llm_service = LLMService()
+    result = llm_service.clear_cache()
+    return CacheClearResponse(**result)
+
+
+@router.delete("/cache/{cache_type}", response_model=CacheClearResponse)
+async def clear_cache_by_type(cache_type: str):
+    """Clear specific type of LLM cache (headlines, sentiment, positions)"""
+    if cache_type not in ["headlines", "sentiment", "positions"]:
+        raise HTTPException(
+            status_code=400, 
+            detail="Cache type must be 'headlines', 'sentiment', or 'positions'"
+        )
+    
+    llm_service = LLMService()
+    result = llm_service.clear_cache(cache_type)
+    return CacheClearResponse(**result)

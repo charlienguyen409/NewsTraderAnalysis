@@ -142,7 +142,7 @@ class NewsScraper:
                                 }
                             })
                 
-                return articles[:50]  # Limit to 50 recent articles
+                return articles  # Return all available articles
                 
         except Exception as e:
             logging.error(f"Error scraping FinViz: {e}")
@@ -179,7 +179,7 @@ class NewsScraper:
                     logging.error(error_msg)
                     raise Exception(error_msg)
                 
-                for link in article_links[:50]:  # Limit to 50 articles
+                for link in article_links:  # Process all available articles
                     try:
                         if not link.get('href') or not link.text.strip():
                             continue

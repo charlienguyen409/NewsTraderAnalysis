@@ -88,6 +88,42 @@ async def websocket_endpoint(
         websocket_manager.disconnect(client_id)
 
 
+@app.websocket("/ws/analysis/{session_id}")
+async def analysis_websocket_endpoint(
+    websocket: WebSocket,
+    session_id: str,
+    client_id: str = Query(default_factory=lambda: str(uuid4()))
+):
+    await websocket_manager.connect(websocket, client_id)
+    # Automatically subscribe to the analysis session
+    await websocket_manager.subscribe_to_session(client_id, session_id)
+    
+    try:
+        # Send confirmation message
+        await websocket_manager.send_personal_message(
+            {"type": "subscription_confirmed", "session_id": session_id},
+            client_id
+        )
+        
+        while True:
+            data = await websocket.receive_text()
+            # Echo any messages back for now
+            try:
+                message = json.loads(data)
+                await websocket_manager.send_personal_message(
+                    {"type": "echo", "data": message},
+                    client_id
+                )
+            except json.JSONDecodeError:
+                await websocket_manager.send_personal_message(
+                    {"type": "error", "message": "Invalid JSON"},
+                    client_id
+                )
+                
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(client_id)
+
+
 @app.get("/")
 async def root():
     return {"message": "Market Analysis API", "version": "1.0.0"}

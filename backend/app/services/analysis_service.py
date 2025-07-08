@@ -52,7 +52,7 @@ class AnalysisService:
             
             # Step 2: Filter relevant headlines using LLM
             await self._broadcast_status(session_id, "filtering", f"Filtering {len(articles)} headlines for relevance...")
-            relevant_articles = await self._filter_relevant_headlines(articles, request.llm_model, session_id)
+            relevant_articles = await self._filter_relevant_headlines(articles, request.llm_model, session_id, max_headlines=100)
             
             # Step 3: Scrape full article content
             await self._broadcast_status(session_id, "content_scraping", f"Scraping content for {len(relevant_articles)} articles...")
@@ -72,7 +72,11 @@ class AnalysisService:
                 analyses, session_id, request.max_positions, request.min_confidence
             )
             
-            # Step 7: Complete analysis
+            # Step 7: Generate market summary
+            await self._broadcast_status(session_id, "summarizing", "Generating daily market summary...")
+            market_summary = await self._generate_market_summary(stored_articles, analyses, positions, request.llm_model, session_id)
+            
+            # Step 8: Complete analysis
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
@@ -86,7 +90,8 @@ class AnalysisService:
                     "articles_analyzed": len(stored_articles),
                     "duration": duration,
                     "articles_scraped": len(articles),
-                    "articles_filtered": len(relevant_articles)
+                    "articles_filtered": len(relevant_articles),
+                    "market_summary_generated": True
                 }
             )
             
@@ -102,6 +107,8 @@ class AnalysisService:
             )
             
             logging.info(f"Analysis session {session_id} completed in {duration:.2f}s")
+            
+            return market_summary
             
         except Exception as e:
             logging.error(f"Error in analysis session {session_id}: {e}")
@@ -136,7 +143,7 @@ class AnalysisService:
             
             # Step 2: Filter relevant headlines using LLM
             await self._broadcast_status(session_id, "filtering", f"Filtering {len(articles)} headlines for relevance...")
-            relevant_articles = await self._filter_relevant_headlines(articles, request.llm_model, session_id)
+            relevant_articles = await self._filter_relevant_headlines(articles, request.llm_model, session_id, max_headlines=100)
             
             # Step 3: Store articles (with headlines only - no content scraping)
             await self._broadcast_status(session_id, "storing", "Storing headline data...")
@@ -152,7 +159,11 @@ class AnalysisService:
                 analyses, session_id, request.max_positions, request.min_confidence
             )
             
-            # Step 6: Complete analysis
+            # Step 6: Generate market summary
+            await self._broadcast_status(session_id, "summarizing", "Generating daily market summary...")
+            market_summary = await self._generate_market_summary(stored_articles, analyses, positions, request.llm_model, session_id)
+            
+            # Step 7: Complete analysis
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
             
@@ -184,6 +195,8 @@ class AnalysisService:
             )
             
             logging.info(f"Headline analysis session {session_id} completed in {duration:.2f}s")
+            
+            return market_summary
             
         except Exception as e:
             logging.error(f"Error in headline analysis session {session_id}: {e}")
@@ -227,16 +240,19 @@ class AnalysisService:
         
         return all_articles
 
-    async def _filter_relevant_headlines(self, articles: List[Dict], model: str, session_id: UUID) -> List[Dict]:
+    async def _filter_relevant_headlines(self, articles: List[Dict], model: str, session_id: UUID, max_headlines: int = 50) -> List[Dict]:
         """Filter headlines for trading relevance using LLM"""
         try:
-            selected_indices = await self.llm_service.analyze_headlines(articles, model)
+            # First deduplicate articles by title similarity and date
+            deduplicated_articles = self._deduplicate_articles(articles)
+            
+            selected_indices = await self.llm_service.analyze_headlines(deduplicated_articles, model, max_headlines, str(session_id))
             relevant_articles = []
             
             for selection in selected_indices:
                 index = selection.get("index", 0) - 1  # Convert to 0-based
-                if 0 <= index < len(articles):
-                    article = articles[index].copy()
+                if 0 <= index < len(deduplicated_articles):
+                    article = deduplicated_articles[index].copy()
                     article["selection_reasoning"] = selection.get("reasoning", "")
                     relevant_articles.append(article)
             
@@ -250,11 +266,11 @@ class AnalysisService:
             ]
             
             self.activity_log.log_headline_filtering(
-                len(articles),
+                len(deduplicated_articles),
                 len(relevant_articles),
                 session_id,
                 selected_headlines=selected_headlines,
-                reasoning=f"LLM selected {len(relevant_articles)} articles as trading-relevant"
+                reasoning=f"LLM selected {len(relevant_articles)} articles from {len(deduplicated_articles)} deduplicated articles (originally {len(articles)})"
             )
             
             return relevant_articles
@@ -270,6 +286,66 @@ class AnalysisService:
             )
             # Fallback: return first 20 articles
             return articles[:20]
+
+    def _deduplicate_articles(self, articles: List[Dict]) -> List[Dict]:
+        """Deduplicate articles by title similarity and date"""
+        from datetime import datetime
+        import difflib
+        
+        if not articles:
+            return articles
+        
+        deduplicated = []
+        seen_titles = []
+        
+        for article in articles:
+            title = article.get('title', '').strip().lower()
+            published_at = article.get('published_at')
+            
+            # Skip if no title
+            if not title:
+                continue
+            
+            # Check for similar titles (85% similarity threshold)
+            is_duplicate = False
+            for seen_title, seen_date in seen_titles:
+                similarity = difflib.SequenceMatcher(None, title, seen_title).ratio()
+                
+                # If titles are very similar (85%+) and from same day, skip
+                if similarity >= 0.85:
+                    # Check if same day
+                    if published_at and seen_date:
+                        try:
+                            if isinstance(published_at, str):
+                                pub_date = datetime.fromisoformat(published_at.replace('Z', '+00:00')).date()
+                            else:
+                                pub_date = published_at.date()
+                            
+                            if isinstance(seen_date, str):
+                                seen_date_obj = datetime.fromisoformat(seen_date.replace('Z', '+00:00')).date()
+                            else:
+                                seen_date_obj = seen_date.date()
+                            
+                            if pub_date == seen_date_obj:
+                                is_duplicate = True
+                                break
+                        except:
+                            # If date parsing fails, still consider it duplicate if titles are very similar
+                            is_duplicate = True
+                            break
+                    else:
+                        # No date info, just use title similarity
+                        is_duplicate = True
+                        break
+            
+            if not is_duplicate:
+                deduplicated.append(article)
+                seen_titles.append((title, published_at))
+        
+        duplicates_found = len(articles) - len(deduplicated)
+        logging.info(f"Deduplicated {len(articles)} articles to {len(deduplicated)} unique articles")
+        
+        return deduplicated
 
     async def _scrape_article_contents(self, articles: List[Dict], session_id: UUID) -> List[Dict]:
         """Scrape full content for filtered articles"""
@@ -307,9 +383,53 @@ class AnalysisService:
                     article_metadata=article_data.get("article_metadata", {})
                 )
                 
-                # Check if article already exists
+                # Check if article already exists (by URL or by title+date)
                 existing = self.db.query(Article).filter(Article.url == article_create.url).first()
+                
+                if not existing and article_create.title and article_create.published_at:
+                    # Also check for similar title on same date
+                    from datetime import datetime, timedelta
+                    
+                    # Get date range (same day)
+                    if isinstance(article_create.published_at, str):
+                        pub_date = datetime.fromisoformat(article_create.published_at.replace('Z', '+00:00'))
+                    else:
+                        pub_date = article_create.published_at
+                    
+                    start_date = pub_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                    end_date = start_date + timedelta(days=1)
+                    
+                    # Look for articles with similar titles on the same date
+                    same_day_articles = self.db.query(Article).filter(
+                        Article.published_at >= start_date,
+                        Article.published_at < end_date,
+                        Article.title.isnot(None)
+                    ).all()
+                    
+                    # Check title similarity
+                    import difflib
+                    for same_day_article in same_day_articles:
+                        if same_day_article.title:
+                            similarity = difflib.SequenceMatcher(
+                                None, 
+                                article_create.title.lower().strip(), 
+                                same_day_article.title.lower().strip()
+                            ).ratio()
+                            
+                            if similarity >= 0.85:  # 85% similarity threshold
+                                existing = same_day_article
+                                break
+                
                 if existing:
+                    # Log database article reuse
+                    reuse_reason = "URL match" if existing.url == article_create.url else "Title similarity + same date"
+                    self.activity_log.log_database_article_reuse(
+                        article_url=existing.url,
+                        article_title=existing.title or "No title",
+                        reuse_reason=reuse_reason,
+                        session_id=session_id
+                    )
+                    
                     stored_articles.append({
                         **article_data,
                         "article_id": existing.id
@@ -345,9 +465,19 @@ class AnalysisService:
         """Analyze sentiment for each article"""
         analyses = []
         
-        for article in articles:
+        for i, article in enumerate(articles, 1):
             try:
-                sentiment_analysis = await self.llm_service.analyze_sentiment(article, model)
+                # Log real-time progress
+                article_title = article.get("title", "Unknown Article")
+                self.activity_log.log_task_progress(
+                    task_name="Sentiment Analysis",
+                    current_item=i,
+                    total_items=len(articles),
+                    item_identifier=f"{article.get('ticker', 'N/A')}: {article_title}",
+                    session_id=session_id
+                )
+                
+                sentiment_analysis = await self.llm_service.analyze_sentiment(article, model, str(session_id))
                 
                 # Log individual LLM analysis
                 self.activity_log.log_llm_analysis(
@@ -373,6 +503,12 @@ class AnalysisService:
                 )
                 
                 db_analysis = analysis_crud.create_analysis(self.db, analysis_create)
+                
+                # Mark article as processed
+                db_article = self.db.query(Article).filter(Article.id == article["article_id"]).first()
+                if db_article:
+                    db_article.is_processed = True
+                    self.db.commit()
                 
                 analyses.append({
                     **sentiment_analysis,
@@ -480,8 +616,18 @@ class AnalysisService:
         """Analyze sentiment based on headlines only (no full content)"""
         analyses = []
         
-        for article in articles:
+        for i, article in enumerate(articles, 1):
             try:
+                # Log real-time progress
+                article_title = article.get("title", "Unknown Article")
+                self.activity_log.log_task_progress(
+                    task_name="Headlines Sentiment Analysis",
+                    current_item=i,
+                    total_items=len(articles),
+                    item_identifier=f"{article.get('ticker', 'N/A')}: {article_title}",
+                    session_id=session_id
+                )
+                
                 # Create a simplified article dict with just headline and metadata
                 headline_article = {
                     'title': article.get('title', ''),
@@ -491,7 +637,7 @@ class AnalysisService:
                     'content': f"Headline: {article.get('title', '')}"  # Use headline as content
                 }
                 
-                sentiment_analysis = await self.llm_service.analyze_sentiment(headline_article, model)
+                sentiment_analysis = await self.llm_service.analyze_sentiment(headline_article, model, str(session_id))
                 
                 # Log individual LLM analysis
                 self.activity_log.log_llm_analysis(
@@ -520,6 +666,12 @@ class AnalysisService:
                 )
                 
                 db_analysis = analysis_crud.create_analysis(self.db, analysis_create)
+                
+                # Mark article as processed
+                db_article = self.db.query(Article).filter(Article.id == article["article_id"]).first()
+                if db_article:
+                    db_article.is_processed = True
+                    self.db.commit()
                 
                 analyses.append({
                     **sentiment_analysis,
@@ -627,6 +779,55 @@ class AnalysisService:
                 session_id=session_id
             )
             return []
+
+    async def _generate_market_summary(self, articles: List[Dict], analyses: List[Dict], positions: List, llm_model: str, session_id: UUID) -> Dict:
+        """Generate market summary using LLM"""
+        try:
+            # Convert stored positions to dict format for LLM
+            positions_data = []
+            for position in positions:
+                if hasattr(position, '__dict__'):
+                    positions_data.append({
+                        'ticker': position.ticker,
+                        'position_type': position.position_type.value if hasattr(position.position_type, 'value') else str(position.position_type),
+                        'confidence': position.confidence,
+                        'reasoning': position.reasoning
+                    })
+                else:
+                    positions_data.append(position)
+            
+            # Log market summary generation
+            self.activity_log.log_analysis_progress(
+                "generate_market_summary",
+                f"Generating daily market summary from {len(articles)} articles and {len(analyses)} analyses",
+                session_id,
+                {
+                    "articles_count": len(articles),
+                    "analyses_count": len(analyses),
+                    "positions_count": len(positions_data),
+                    "model": llm_model
+                }
+            )
+            
+            summary = await self.llm_service.generate_market_summary(
+                articles, analyses, positions_data, llm_model, str(session_id)
+            )
+            
+            return summary
+            
+        except Exception as e:
+            logging.error(f"Error generating market summary: {e}")
+            self.activity_log.log_error(
+                "llm",
+                "generate_market_summary",
+                e,
+                context={"model": llm_model},
+                session_id=session_id
+            )
+            return {
+                "error": str(e),
+                "summary": "Unable to generate market summary due to technical issues."
+            }
 
     async def _broadcast_status(self, session_id: UUID, status: str, message: str, data: Dict = None):
         """Broadcast analysis status via WebSocket"""

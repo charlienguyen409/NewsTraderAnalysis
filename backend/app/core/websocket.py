@@ -65,12 +65,14 @@ class WebSocketManager:
         message: str, 
         data: dict = None
     ):
+        from datetime import datetime, timezone
+        
         message_data = {
             "type": "analysis_status",
             "session_id": str(session_id),
             "status": status,
             "message": message,
-            "timestamp": json.dumps(None),  # Will be replaced with proper timestamp
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data or {}
         }
         

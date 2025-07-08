@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_
 from typing import List, Optional
 from uuid import UUID
@@ -21,7 +21,7 @@ class ArticleCRUD:
         ticker: Optional[str] = None,
         search: Optional[str] = None
     ) -> List[Article]:
-        query = db.query(Article)
+        query = db.query(Article).options(joinedload(Article.analyses))
         
         if source:
             query = query.filter(Article.source == source)
@@ -38,7 +38,7 @@ class ArticleCRUD:
         return query.order_by(Article.scraped_at.desc()).offset(skip).limit(limit).all()
 
     def get_article(self, db: Session, article_id: UUID) -> Optional[Article]:
-        return db.query(Article).filter(Article.id == article_id).first()
+        return db.query(Article).options(joinedload(Article.analyses)).filter(Article.id == article_id).first()
 
     def create_article(self, db: Session, article: ArticleCreate) -> Article:
         db_article = Article(**article.dict())

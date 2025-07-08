@@ -1,7 +1,22 @@
 from pydantic import BaseModel, HttpUrl
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from uuid import UUID
+
+
+class AnalysisData(BaseModel):
+    id: UUID
+    ticker: str
+    sentiment_score: float
+    confidence: float
+    catalysts: List[Dict[str, Any]]
+    reasoning: str
+    llm_model: str
+    created_at: datetime
+    raw_response: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
 
 
 class ArticleBase(BaseModel):
@@ -32,6 +47,7 @@ class ArticleResponse(ArticleBase):
     url: str
     scraped_at: datetime
     is_processed: bool
+    analyses: List[AnalysisData] = []
 
     class Config:
         from_attributes = True
