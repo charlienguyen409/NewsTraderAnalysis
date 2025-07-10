@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+import os
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -13,7 +15,9 @@ class Settings(BaseSettings):
     scraping_rate_limit: int = 10
     
     class Config:
-        env_file = ".env"
+        # Look for .env file in project root
+        env_file = Path(__file__).parent.parent.parent.parent / ".env"
+        extra = "ignore"  # Ignore extra fields like VITE_* variables
 
 
 settings = Settings()

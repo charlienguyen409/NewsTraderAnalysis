@@ -38,15 +38,11 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/backend/Dockerfile
+    env_file:
+      - ../.env
     environment:
       DATABASE_URL: postgresql://market_user:market_password@postgres:5432/market_analysis
       REDIS_URL: redis://redis:6379
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
-      MAX_POSITIONS: ${MAX_POSITIONS:-10}
-      MIN_CONFIDENCE: ${MIN_CONFIDENCE:-0.7}
-      SCRAPING_RATE_LIMIT: ${SCRAPING_RATE_LIMIT:-10}
     ports:
       - "8000:8000"
     depends_on:
