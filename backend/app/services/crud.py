@@ -6,9 +6,11 @@ from uuid import UUID
 from ..models.article import Article
 from ..models.position import Position
 from ..models.analysis import Analysis
+from ..models.market_summary import MarketSummary
 from ..schemas.article import ArticleCreate, ArticleUpdate
 from ..schemas.position import PositionCreate
 from ..schemas.analysis import AnalysisCreate
+from ..schemas.market_summary import MarketSummaryCreate
 
 
 class ArticleCRUD:
@@ -118,6 +120,42 @@ class AnalysisCRUD:
         return db.query(Analysis).filter(Analysis.article_id == article_id).all()
 
 
+class MarketSummaryCRUD:
+    def create_market_summary(self, db: Session, market_summary: MarketSummaryCreate) -> MarketSummary:
+        """Create a new market summary in the database"""
+        db_summary = MarketSummary(**market_summary.dict())
+        db.add(db_summary)
+        db.commit()
+        db.refresh(db_summary)
+        return db_summary
+    
+    def get_latest_market_summary(self, db: Session) -> Optional[MarketSummary]:
+        """Get the most recent market summary from any analysis session"""
+        return db.query(MarketSummary).order_by(MarketSummary.generated_at.desc()).first()
+    
+    def get_market_summary_by_session(self, db: Session, session_id: UUID) -> Optional[MarketSummary]:
+        """Get market summary by session ID"""
+        return db.query(MarketSummary).filter(
+            MarketSummary.session_id == session_id
+        ).order_by(MarketSummary.generated_at.desc()).first()
+    
+    def get_market_summaries(
+        self, 
+        db: Session, 
+        skip: int = 0, 
+        limit: int = 50,
+        analysis_type: Optional[str] = None
+    ) -> List[MarketSummary]:
+        """Get list of market summaries with optional filtering"""
+        query = db.query(MarketSummary)
+        
+        if analysis_type:
+            query = query.filter(MarketSummary.analysis_type == analysis_type)
+        
+        return query.order_by(MarketSummary.generated_at.desc()).offset(skip).limit(limit).all()
+
+
 article_crud = ArticleCRUD()
 position_crud = PositionCRUD()
 analysis_crud = AnalysisCRUD()
+market_summary_crud = MarketSummaryCRUD()

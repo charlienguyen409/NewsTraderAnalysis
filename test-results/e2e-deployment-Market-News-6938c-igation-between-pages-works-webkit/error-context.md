@@ -1,0 +1,77 @@
+# Page snapshot
+
+```yaml
+- img
+- text: Market Analysis
+- navigation:
+  - link "Dashboard":
+    - /url: /
+    - img
+    - text: Dashboard
+  - link "Articles":
+    - /url: /articles
+    - img
+    - text: Articles
+  - link "Positions":
+    - /url: /positions
+    - img
+    - text: Positions
+  - link "Settings":
+    - /url: /settings
+    - img
+    - text: Settings
+- main:
+  - heading "Market Analysis Dashboard" [level=1]
+  - paragraph: AI-powered financial news analysis and trading recommendations
+  - img
+  - heading "Full Analysis" [level=2]
+  - paragraph: Complete article content scraping and analysis
+  - text: Max Positions
+  - spinbutton: "10"
+  - text: Min Confidence
+  - spinbutton: "0.7"
+  - text: LLM Model
+  - paragraph: AI model for content analysis
+  - combobox:
+    - option "GPT-4.1"
+    - option "GPT-4.1 Mini" [selected]
+    - option "GPT-4.1 Nano"
+    - option "GPT-4o"
+    - option "GPT-4o Mini"
+    - option "GPT-4 Turbo"
+    - option "GPT-4"
+    - option "GPT-3.5 Turbo"
+    - option "Claude 3.5 Sonnet"
+    - option "Claude 3.5 Haiku"
+    - option "Claude 3 Opus"
+  - button "Start Full Analysis":
+    - img
+    - text: Start Full Analysis
+  - img
+  - heading "Headlines Analysis" [level=2]
+  - paragraph: Fast analysis using headlines and summaries only
+  - text: Max Positions
+  - spinbutton: "5"
+  - text: Min Confidence
+  - spinbutton: "0.6"
+  - text: LLM Model
+  - paragraph: AI model for headline analysis
+  - combobox:
+    - option "GPT-4.1"
+    - option "GPT-4.1 Mini" [selected]
+    - option "GPT-4.1 Nano"
+    - option "GPT-4o"
+    - option "GPT-4o Mini"
+    - option "GPT-4 Turbo"
+    - option "GPT-4"
+    - option "GPT-3.5 Turbo"
+    - option "Claude 3.5 Sonnet"
+    - option "Claude 3.5 Haiku"
+    - option "Claude 3 Opus"
+  - button "Start Headlines Analysis":
+    - img
+    - text: Start Headlines Analysis
+  - heading "Recent Positions" [level=2]
+  - paragraph: No positions yet. Start an analysis to generate recommendations.
+  - heading "Activity Log" [level=2]
+```

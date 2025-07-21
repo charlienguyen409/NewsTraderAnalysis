@@ -1,0 +1,303 @@
+name: End-to-End Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run E2E tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+        
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create test environment file
+        run: |
+          cat > .env.test << EOF
+          POSTGRES_DB=market_analysis_test
+          POSTGRES_USER=testuser
+          POSTGRES_PASSWORD=testpass
+          DATABASE_URL=postgresql://testuser:testpass@localhost:5433/market_analysis_test
+          REDIS_URL=redis://localhost:6380
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'test-key' }}
+          ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY || 'test-key' }}
+          ENVIRONMENT=test
+          BASE_URL=http://localhost:5174
+          API_URL=http://localhost:8001
+          EOF
+
+      - name: Start test services
+        run: |
+          cd e2e
+          docker-compose -f docker-compose.test.yml up -d postgres-test redis-test
+          
+      - name: Wait for database
+        run: |
+          timeout 60 bash -c 'until docker-compose -f e2e/docker-compose.test.yml exec -T postgres-test pg_isready -U testuser -d market_analysis_test; do sleep 2; done'
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
+
+      - name: Run database migrations
+        run: |
+          cd backend
+          export DATABASE_URL=postgresql://testuser:testpass@localhost:5433/market_analysis_test
+          python create_activity_log_table.py
+
+      - name: Start backend service
+        run: |
+          cd backend
+          export DATABASE_URL=postgresql://testuser:testpass@localhost:5433/market_analysis_test
+          export REDIS_URL=redis://localhost:6380
+          export ENVIRONMENT=test
+          uvicorn app.main:app --host 0.0.0.0 --port 8001 &
+          echo $! > backend.pid
+          
+      - name: Wait for backend
+        run: |
+          timeout 60 bash -c 'until curl -f http://localhost:8001/health; do sleep 2; done'
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Start frontend service
+        run: |
+          cd frontend
+          export VITE_API_URL=http://localhost:8001
+          export VITE_WS_URL=ws://localhost:8001/ws
+          npm run dev -- --host 0.0.0.0 --port 5174 &
+          echo $! > frontend.pid
+
+      - name: Wait for frontend
+        run: |
+          timeout 60 bash -c 'until curl -f http://localhost:5174; do sleep 2; done'
+
+      - name: Install E2E test dependencies
+        run: |
+          cd e2e
+          npm ci
+
+      - name: Install Playwright browsers
+        run: |
+          cd e2e
+          npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run E2E tests
+        run: |
+          cd e2e
+          export BASE_URL=http://localhost:5174
+          export API_URL=http://localhost:8001
+          npx playwright test --project=${{ matrix.browser }}
+        env:
+          CI: true
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-results-${{ matrix.browser }}
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
+          retention-days: 30
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.browser }}
+          path: e2e/coverage/
+          retention-days: 7
+
+      - name: Stop services
+        if: always()
+        run: |
+          if [ -f backend.pid ]; then
+            kill $(cat backend.pid) || true
+            rm backend.pid
+          fi
+          if [ -f frontend.pid ]; then
+            kill $(cat frontend.pid) || true
+            rm frontend.pid
+          fi
+          cd e2e
+          docker-compose -f docker-compose.test.yml down -v
+
+  # Aggregate test results
+  test-results:
+    name: Test Results Summary
+    needs: e2e-tests
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: playwright-results-*
+          merge-multiple: true
+          path: all-results
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        with:
+          name: E2E Test Results
+          path: 'all-results/**/*.xml'
+          reporter: jest-junit
+          fail-on-error: false
+
+      - name: Create test summary
+        if: always()
+        run: |
+          echo "## E2E Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Count test files
+          test_files=$(find all-results -name "*.spec.ts" -o -name "*.test.ts" | wc -l)
+          echo "📁 **Test Files:** $test_files" >> $GITHUB_STEP_SUMMARY
+          
+          # Count results
+          if [ -d "all-results" ]; then
+            passed=$(find all-results -name "*passed*" | wc -l)
+            failed=$(find all-results -name "*failed*" | wc -l)
+            echo "✅ **Passed:** $passed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Failed:** $failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Browser Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌐 Chromium" >> $GITHUB_STEP_SUMMARY
+          echo "- 🦊 Firefox" >> $GITHUB_STEP_SUMMARY
+          echo "- 🧭 WebKit (Safari)" >> $GITHUB_STEP_SUMMARY
+
+  # Performance testing job
+  performance-tests:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup test environment
+        run: |
+          cd e2e
+          docker-compose -f docker-compose.test.yml up -d
+
+      - name: Wait for services
+        run: |
+          timeout 120 bash -c 'until curl -f http://localhost:5174 && curl -f http://localhost:8001/health; do sleep 5; done'
+
+      - name: Install dependencies
+        run: |
+          cd e2e
+          npm ci
+          npx playwright install chromium
+
+      - name: Run performance tests
+        run: |
+          cd e2e
+          npx playwright test --grep="performance|load|speed" --project=chromium
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-results
+          path: e2e/test-results/
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd e2e
+          docker-compose -f docker-compose.test.yml down -v
+
+  # Security testing
+  security-tests:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Setup test environment
+        run: |
+          cd e2e
+          docker-compose -f docker-compose.test.yml up -d
+
+      - name: Wait for services
+        run: |
+          timeout 120 bash -c 'until curl -f http://localhost:5174 && curl -f http://localhost:8001/health; do sleep 5; done'
+
+      - name: Install dependencies
+        run: |
+          cd e2e
+          npm ci
+          npx playwright install chromium
+
+      - name: Run security tests
+        run: |
+          cd e2e
+          npx playwright test --grep="security|xss|csrf|auth" --project=chromium
+
+      - name: Upload security results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-results
+          path: e2e/test-results/
+          retention-days: 30
+
+      - name: Cleanup
+        if: always()
+        run: |
+          cd e2e
+          docker-compose -f docker-compose.test.yml down -v

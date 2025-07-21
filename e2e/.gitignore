@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test Results
+test-results/
+playwright-report/
+coverage/
+
+# Playwright
+playwright/.cache/
+
+# Screenshots and Videos
+screenshots/
+videos/
+traces/
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.test
+.env.production
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+tmp/
+temp/
+
+# Docker volumes
+postgres_test_data/
+redis_test_data/

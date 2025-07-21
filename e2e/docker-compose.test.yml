@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Test Database
+  postgres-test:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: market_analysis_test
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ../docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d market_analysis_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis Test Cache
+  redis-test:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_test_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Backend Test Service
+  backend-test:
+    build:
+      context: ../backend
+      dockerfile: ../docker/backend/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://testuser:testpass@postgres-test:5432/market_analysis_test
+      - REDIS_URL=redis://redis-test:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-test-key}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-test-key}
+      - ENVIRONMENT=test
+      - LOG_LEVEL=INFO
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ../backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Frontend Test Service
+  frontend-test:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/frontend/Dockerfile
+    environment:
+      - VITE_API_URL=http://backend-test:8000
+      - VITE_WS_URL=ws://backend-test:8000/ws
+      - NODE_ENV=test
+    ports:
+      - "5174:5173"
+    depends_on:
+      backend-test:
+        condition: service_healthy
+    volumes:
+      - ../frontend:/app
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+
+  # E2E Test Runner
+  e2e-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    environment:
+      - BASE_URL=http://frontend-test:5173
+      - API_URL=http://backend-test:8000
+      - CI=true
+    depends_on:
+      - frontend-test
+      - backend-test
+    volumes:
+      - ./:/app
+      - ./test-results:/app/test-results
+      - ./playwright-report:/app/playwright-report
+    working_dir: /app
+    command: npm run test
+
+volumes:
+  postgres_test_data:
+  redis_test_data:

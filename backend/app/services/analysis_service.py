@@ -7,13 +7,15 @@ from sqlalchemy.orm import Session
 
 from .scraper import NewsScraper
 from .llm_service import LLMService
-from .crud import article_crud, analysis_crud, position_crud
+from .crud import article_crud, analysis_crud, position_crud, market_summary_crud
 from .activity_log_service import ActivityLogService
 from ..models.article import Article
+from ..models.market_summary import AnalysisTypeEnum
 from ..schemas.analysis_request import AnalysisRequest
 from ..schemas.article import ArticleCreate
 from ..schemas.analysis import AnalysisCreate
 from ..schemas.position import PositionCreate
+from ..schemas.market_summary import MarketSummaryCreate
 from ..models.position import PositionType
 
 
@@ -74,7 +76,7 @@ class AnalysisService:
             
             # Step 7: Generate market summary
             await self._broadcast_status(session_id, "summarizing", "Generating daily market summary...")
-            market_summary = await self._generate_market_summary(stored_articles, analyses, positions, request.llm_model, session_id)
+            market_summary = await self._generate_market_summary(stored_articles, analyses, positions, request.llm_model, session_id, "full")
             
             # Step 8: Complete analysis
             end_time = datetime.now()
@@ -161,7 +163,7 @@ class AnalysisService:
             
             # Step 6: Generate market summary
             await self._broadcast_status(session_id, "summarizing", "Generating daily market summary...")
-            market_summary = await self._generate_market_summary(stored_articles, analyses, positions, request.llm_model, session_id)
+            market_summary = await self._generate_market_summary(stored_articles, analyses, positions, request.llm_model, session_id, "headlines")
             
             # Step 7: Complete analysis
             end_time = datetime.now()
@@ -780,8 +782,8 @@ class AnalysisService:
             )
             return []
 
-    async def _generate_market_summary(self, articles: List[Dict], analyses: List[Dict], positions: List, llm_model: str, session_id: UUID) -> Dict:
-        """Generate market summary using LLM"""
+    async def _generate_market_summary(self, articles: List[Dict], analyses: List[Dict], positions: List, llm_model: str, session_id: UUID, analysis_type: str = "full") -> Dict:
+        """Generate market summary using LLM and store in database"""
         try:
             # Convert stored positions to dict format for LLM
             positions_data = []
@@ -805,23 +807,56 @@ class AnalysisService:
                     "articles_count": len(articles),
                     "analyses_count": len(analyses),
                     "positions_count": len(positions_data),
-                    "model": llm_model
+                    "model": llm_model,
+                    "analysis_type": analysis_type
                 }
             )
             
+            # Generate summary using LLM
             summary = await self.llm_service.generate_market_summary(
                 articles, analyses, positions_data, llm_model, str(session_id)
+            )
+            
+            # Prepare data sources metadata
+            data_sources = {
+                "articles_count": len(articles),
+                "analyses_count": len(analyses),
+                "positions_count": len(positions_data)
+            }
+            
+            # Store market summary in database
+            summary_create = MarketSummaryCreate(
+                session_id=session_id,
+                summary_data=summary,
+                analysis_type=AnalysisTypeEnum.FULL if analysis_type == "full" else AnalysisTypeEnum.HEADLINES,
+                model_used=llm_model,
+                data_sources=data_sources
+            )
+            
+            db_summary = market_summary_crud.create_market_summary(self.db, summary_create)
+            
+            # Log market summary storage
+            self.activity_log.log_analysis_progress(
+                "store_market_summary",
+                f"Market summary stored in database with ID {db_summary.id}",
+                session_id,
+                {
+                    "summary_id": str(db_summary.id),
+                    "analysis_type": analysis_type,
+                    "model": llm_model,
+                    "data_sources": data_sources
+                }
             )
             
             return summary
             
         except Exception as e:
-            logging.error(f"Error generating market summary: {e}")
+            logging.error(f"Error generating/storing market summary: {e}")
             self.activity_log.log_error(
                 "llm",
                 "generate_market_summary",
                 e,
-                context={"model": llm_model},
+                context={"model": llm_model, "analysis_type": analysis_type},
                 session_id=session_id
             )
             return {

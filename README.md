@@ -48,8 +48,16 @@ AI-powered financial news analysis and trading recommendations using React front
 
 2. **Set up environment variables**
    ```bash
+   # Copy the main environment file
    cp .env.example .env
-   # Edit .env with your API keys
+   
+   # Copy backend environment file
+   cp backend/.env.example backend/.env
+   
+   # Copy frontend environment file
+   cp frontend/.env.example frontend/.env
+   
+   # Edit .env files with your actual API keys and configuration
    ```
 
 3. **Start services with Docker Compose**
@@ -59,7 +67,7 @@ AI-powered financial news analysis and trading recommendations using React front
    ```
 
 4. **Access the application**
-   - Frontend: http://localhost:3000
+   - Frontend: http://localhost:3001
    - Backend API: http://localhost:8000
    - API Documentation: http://localhost:8000/docs
 
@@ -180,15 +188,96 @@ VITE_WS_URL=ws://localhost:8000/ws
 - Add loading states for all async operations
 
 ### Testing
-```bash
-# Backend tests
-cd backend
-pytest
 
-# Frontend tests  
+The project includes comprehensive testing across all layers:
+
+#### Unit Tests
+```bash
+# Backend unit tests
+cd backend
+pytest tests/unit/ -v
+
+# Frontend unit tests
 cd frontend
 npm test
+
+# Run with coverage
+cd backend
+pytest tests/unit/ --cov=app --cov-report=html
+
+cd frontend
+npm run test:coverage
 ```
+
+#### Integration Tests
+```bash
+# Backend integration tests (requires Docker)
+cd backend
+python tests/integration/run_integration_tests.py
+
+# Frontend integration tests
+cd frontend
+npm run test:integration
+
+# Run specific integration test
+cd backend
+python tests/integration/run_integration_tests.py -k TestCompleteAnalysisWorkflows
+```
+
+#### End-to-End Tests
+```bash
+# E2E tests with Playwright (requires running application)
+cd e2e
+npm test
+
+# Run specific E2E test
+npx playwright test market-analysis-trigger.spec.ts
+
+# Run with browser UI
+npx playwright test --ui
+
+# Run in headed mode for debugging
+npx playwright test --headed
+```
+
+#### Performance Tests
+```bash
+# Full performance test suite
+cd performance
+python run_all_tests.py --level comprehensive
+
+# API load testing only
+python -m api.run_load_tests --scenario medium
+
+# WebSocket scalability tests
+python -m websocket.websocket_tests
+
+# Database performance benchmarks
+python -m database.db_performance_tests
+```
+
+#### Quick Test Commands
+```bash
+# Run all tests (requires Docker and running application)
+./scripts/run-all-tests.sh
+
+# Run unit tests only
+./scripts/run-unit-tests.sh
+
+# Run tests with coverage report
+./scripts/run-tests-with-coverage.sh
+
+# Run CI test pipeline
+./scripts/run-ci-tests.sh
+```
+
+#### Test Coverage Targets
+- **Overall Coverage**: ≥80%
+- **Critical Paths**: ≥85%
+- **API Endpoints**: ≥90%
+- **React Components**: ≥80%
+
+For detailed testing instructions, see the [Testing Guide](docs/testing-guide.md).
 
 ## Architecture
 
@@ -209,6 +298,25 @@ npm test
 2. Create a feature branch
 3. Make your changes with tests
 4. Submit a pull request
+
+## Documentation
+
+### Comprehensive Documentation
+- [Testing Guide](docs/testing-guide.md) - Complete testing instructions and best practices
+- [Architecture Documentation](docs/architecture.md) - System design and component overview
+- [API Documentation](docs/api-documentation.md) - Detailed API reference with examples
+- [Test Coverage](docs/test-coverage.md) - Coverage metrics and improvement plans
+
+### Setup and Configuration
+- [Environment Setup](backend/.env.example) - Backend environment configuration
+- [Frontend Configuration](frontend/.env.example) - Frontend environment setup
+- [Docker Configuration](.env.example) - Docker Compose environment setup
+
+### Testing Documentation
+- [Backend Testing](backend/tests/integration/README.md) - Backend integration testing
+- [Frontend Testing](frontend/src/tests/integration/README.md) - Frontend integration testing
+- [E2E Testing](e2e/TESTING_GUIDE.md) - End-to-end testing guide
+- [Performance Testing](performance/README.md) - Performance and load testing
 
 ## License
 

@@ -10,7 +10,7 @@ from .api.routes import articles, positions, analysis, activity_logs
 from .api.endpoints import models
 from .core.database import engine, Base
 from .core.websocket import websocket_manager
-from .models import Article, Analysis, Position
+from .models import Article, Analysis, Position, MarketSummary
 from .models.activity_log import ActivityLog
 
 Base.metadata.create_all(bind=engine)

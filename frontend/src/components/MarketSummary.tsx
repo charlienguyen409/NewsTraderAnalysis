@@ -1,5 +1,5 @@
 import { useQuery } from 'react-query'
-import { TrendingUp, TrendingDown, AlertTriangle, Zap, Clock, Brain, BarChart3, Target } from 'lucide-react'
+import { TrendingUp, TrendingDown, AlertTriangle, Zap, Clock, Brain, BarChart3, Target, RefreshCw, Play, Eye } from 'lucide-react'
 import { analysisApi } from '../lib/api'
 import { formatDate } from '../lib/utils'
 
@@ -29,6 +29,15 @@ interface MarketSummaryData {
     positions_generated: number
     unique_tickers?: number
   }
+  // Analysis session metadata
+  analysis_session?: {
+    session_id: string
+    analysis_type: 'headlines' | 'full'
+    started_at: string
+    completed_at: string
+    duration_seconds: number
+    status: string
+  }
   error?: string
 }
 
@@ -55,15 +64,22 @@ const getStockSentimentColor = (sentiment: string) => {
 }
 
 export default function MarketSummary() {
-  const { data: summary, isLoading, error, refetch } = useQuery<MarketSummaryData>(
+  const { data: summary, isLoading, error, refetch, isFetching } = useQuery<MarketSummaryData>(
     'market-summary',
     () => analysisApi.getMarketSummary(),
     {
       refetchOnWindowFocus: false,
-      staleTime: 5 * 60 * 1000, // 5 minutes
+      // Remove staleTime since summary is now analysis-triggered
+      // Data stays fresh until new analysis is run
+      staleTime: Infinity,
+      cacheTime: 24 * 60 * 60 * 1000, // Cache for 24 hours
       retry: 2
     }
   )
+
+  const handleRefresh = () => {
+    refetch()
+  }
 
   if (isLoading) {
     return (
@@ -84,6 +100,39 @@ export default function MarketSummary() {
   }
 
   if (error || !summary) {
+    // Check if it's a "no analysis run yet" error vs actual error
+    const isNoAnalysisError = error?.response?.status === 404 || 
+                              error?.response?.data?.detail?.includes('No analysis') ||
+                              error?.message?.includes('No analysis')
+
+    if (isNoAnalysisError) {
+      return (
+        <div className="card border-blue-200 bg-blue-50">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <Play className="h-6 w-6 text-blue-600 mr-3" />
+              <div>
+                <h3 className="text-lg font-semibold text-blue-700">No Market Analysis Yet</h3>
+                <p className="text-blue-600">Start an analysis to generate market summary</p>
+              </div>
+            </div>
+            <button 
+              onClick={handleRefresh}
+              disabled={isFetching}
+              className="btn btn-primary flex items-center"
+            >
+              {isFetching ? (
+                <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Check Again
+            </button>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="card border-red-200">
         <div className="flex items-center justify-between">
@@ -95,9 +144,15 @@ export default function MarketSummary() {
             </div>
           </div>
           <button 
-            onClick={() => refetch()} 
-            className="btn btn-secondary"
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className="btn btn-secondary flex items-center"
           >
+            {isFetching ? (
+              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <RefreshCw className="h-4 w-4 mr-2" />
+            )}
             Retry
           </button>
         </div>
@@ -131,18 +186,58 @@ export default function MarketSummary() {
         <div className="flex items-center">
           <Brain className="h-6 w-6 text-blue-600 mr-3" />
           <div>
-            <h3 className="text-xl font-bold text-gray-900">Daily Market Summary</h3>
-            <p className="text-sm text-gray-600">AI-generated analysis from recent market data</p>
+            <div className="flex items-center gap-3 mb-1">
+              <h3 className="text-xl font-bold text-gray-900">Market Summary</h3>
+              {summary.analysis_session && (
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                    summary.analysis_session.analysis_type === 'full' 
+                      ? 'bg-purple-100 text-purple-800' 
+                      : 'bg-green-100 text-green-800'
+                  }`}>
+                    {summary.analysis_session.analysis_type === 'full' ? (
+                      <Eye className="h-3 w-3 mr-1" />
+                    ) : (
+                      <Zap className="h-3 w-3 mr-1" />
+                    )}
+                    {summary.analysis_session.analysis_type === 'full' ? 'Full Analysis' : 'Headlines Only'}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="text-sm text-gray-600">
+              {summary.analysis_session 
+                ? `Generated from ${summary.analysis_session.analysis_type} analysis run on ${formatDate(summary.analysis_session.completed_at)}`
+                : 'AI-generated analysis from recent market data'
+              }
+            </p>
           </div>
         </div>
-        <div className="text-right">
-          <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${sentimentInfo.color}`}>
-            {getSentimentIcon(summary.sentiment_score)}
-            <span className="ml-2">{sentimentInfo.label}</span>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${sentimentInfo.color}`}>
+              {getSentimentIcon(summary.sentiment_score)}
+              <span className="ml-2">{sentimentInfo.label}</span>
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              {summary.analysis_session 
+                ? `Analysis: ${formatDate(summary.analysis_session.completed_at)}`
+                : formatDate(summary.generated_at)
+              }
+            </div>
           </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {formatDate(summary.generated_at)}
-          </div>
+          <button 
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className="btn btn-secondary btn-sm flex items-center"
+            title="Refresh market summary"
+          >
+            {isFetching ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+          </button>
         </div>
       </div>
 
@@ -245,11 +340,14 @@ export default function MarketSummary() {
 
       {/* Footer */}
       <div className="mt-6 pt-4 border-t border-gray-200">
-        <div className="flex items-center justify-between text-sm text-gray-600">
+        <div className="flex items-center justify-between text-sm text-gray-600 mb-3">
           <div className="flex items-center space-x-4">
             <span className="flex items-center">
               <Clock className="h-4 w-4 mr-1" />
-              Updated {formatDate(summary.generated_at)}
+              {summary.analysis_session 
+                ? `Analysis completed ${formatDate(summary.analysis_session.completed_at)}`
+                : `Updated ${formatDate(summary.generated_at)}`
+              }
             </span>
             <span className="flex items-center">
               <Brain className="h-4 w-4 mr-1" />
@@ -262,6 +360,41 @@ export default function MarketSummary() {
             <span>{summary.data_sources?.positions_generated || 0} positions</span>
           </div>
         </div>
+        
+        {/* Analysis Session Details */}
+        {summary.analysis_session && (
+          <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <span className="font-medium text-gray-700">Session ID:</span>
+                <div className="font-mono text-gray-600 mt-1 truncate" title={summary.analysis_session.session_id}>
+                  {summary.analysis_session.session_id.split('_').pop()}
+                </div>
+              </div>
+              <div>
+                <span className="font-medium text-gray-700">Duration:</span>
+                <div className="mt-1">
+                  {summary.analysis_session.duration_seconds 
+                    ? `${Math.round(summary.analysis_session.duration_seconds)}s`
+                    : 'N/A'
+                  }
+                </div>
+              </div>
+              <div>
+                <span className="font-medium text-gray-700">Status:</span>
+                <div className="mt-1 capitalize">
+                  {summary.analysis_session.status}
+                </div>
+              </div>
+              <div>
+                <span className="font-medium text-gray-700">Started:</span>
+                <div className="mt-1">
+                  {formatDate(summary.analysis_session.started_at)}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
